@@ -1,13 +1,8 @@
 package stackoverflow
 
-import org.scalatest.{FunSuite, BeforeAndAfterAll}
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
-import org.apache.spark.SparkConf
-import org.apache.spark.SparkContext
-import org.apache.spark.SparkContext._
-import org.apache.spark.rdd.RDD
-import java.io.File
+import org.scalatest.{BeforeAndAfterAll, FunSuite}
 
 @RunWith(classOf[JUnitRunner])
 class StackOverflowSuite extends FunSuite with BeforeAndAfterAll {
@@ -32,6 +27,20 @@ class StackOverflowSuite extends FunSuite with BeforeAndAfterAll {
       case _: Throwable => false
     }
     assert(instantiatable, "Can't instantiate a StackOverflow object")
+  }
+
+  test("scored rdd should have 2121822 entries") {
+
+    import StackOverflow._
+
+    val lines   = sc.textFile("src/main/resources/stackoverflow/stackoverflow.csv")
+    val raw     = StackOverflow.rawPostings(lines)
+    val grouped = groupedPostings(raw)
+    val scored  = scoredPostings(grouped)
+    val vectors = vectorPostings(scored)
+
+    assert(vectors.count() == 2121822, "Incorrect number of vectors: " + vectors.count())
+    assert(vectors.count() == 2121822, "Incorrect number of vectors: " + vectors.count())
   }
 
 
