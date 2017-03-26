@@ -113,7 +113,15 @@ class StackOverflow extends Serializable {
   }
 
 
-  /** Compute the vectors for the kmeans */
+  /** Compute the vectors for the kmeans
+    *
+    * 𝚜𝚌𝚘𝚛𝚎𝚍 RDD into a 𝚟𝚎𝚌𝚝𝚘𝚛𝚜 RDD containing the vectors to be clustered. In our case, the vectors should be pairs with
+    * two components (in the listed order!):
+    * 1. Index of the language (in the 𝚕𝚊𝚗𝚐𝚜 list) multiplied by the 𝚕𝚊𝚗𝚐𝚂𝚙𝚛𝚎𝚊𝚍 factor.
+    * 2. The highest answer score (computed above).
+    *
+    * @return (1., 2.)
+    **/
   def vectorPostings(scored: RDD[(Posting, Int)]): RDD[(Int, Int)] = {
     /** Return optional index of first language that occurs in `tags`. */
     def firstLangInTag(tag: Option[String], ls: List[String]): Option[Int] = {
@@ -138,7 +146,7 @@ class StackOverflow extends Serializable {
         }
       })
       .map(p => (p._1.get, p._2))
-//      .map((optionL, score) => (optionL.get, score)) //why decomposing pair does never kurwa work????
+//      .map( case (optionL, score) => (optionL.get, score)) //why decomposing pair does never kurwa work????
       .map(p => (p._1 * langSpread, p._2))
 //      .map((lang, score) => (lang * langSpread, score)) //again kurwa, cant decompose this shit
   }
@@ -195,9 +203,18 @@ class StackOverflow extends Serializable {
 
   /** Main kmeans computation */
   @tailrec final def kmeans(means: Array[(Int, Int)], vectors: RDD[(Int, Int)], iter: Int = 1, debug: Boolean = false): Array[(Int, Int)] = {
-    val newMeans = means.clone() // you need to compute newMeans
+//    pairing each vector with the index of the closest mean (its cluster);
+    val pairedVectors = vectors
+      .map(v => (v , means.map(m => (m, euclideanDistance(m, v))).maxBy(_._2)._1)) //pairs of (vector, closestMean)
+      .map(pa => (means.indexOf(pa._2), pa._1))
 
-    // TODO: Fill in the newMeans array
+//        computing the new means by averaging the values of each cluster.
+    val newMeans = pairedVectors
+      .mapValues({ case (a,b) => (a,b,1) })
+      .reduceByKey((a, b) => (a._1 + b._1, a._2 + b._2, a._3 + b._3))
+      .mapValues({ case (a, b, count) => (a/count, b/count) })
+      .values.collect()
+
     val distance = euclideanDistance(means, newMeans)
 
     if (debug) {
@@ -221,15 +238,13 @@ class StackOverflow extends Serializable {
     }
   }
 
-
   //
   //
   //  Kmeans utilities:
   //
   //
-
   /** Decide whether the kmeans clustering converged */
-  def converged(distance: Double) =
+  def converged(distance: Double): Boolean =
     distance < kmeansEta
 
 
@@ -266,7 +281,6 @@ class StackOverflow extends Serializable {
     bestIndex
   }
 
-
   /** Average the vectors */
   def averageVectors(ps: Iterable[(Int, Int)]): (Int, Int) = {
     val iter = ps.iterator
@@ -282,7 +296,6 @@ class StackOverflow extends Serializable {
     ((comp1 / count).toInt, (comp2 / count).toInt)
   }
 
-
   //
   //
   //  Displaying results:
@@ -293,12 +306,29 @@ class StackOverflow extends Serializable {
     val closestGrouped = closest.groupByKey()
 
     val median = closestGrouped.mapValues { vs =>
-      val langLabel: String = ???
+
+      val dominantGroup = vs
+        .groupBy(_._1)      //group by lang code
+        .mapValues(_.size)  //count postings
+        .maxBy(_._2)        //dominant group
+
+//    What is available is RDD[Int, Iterable(Int, Int)]. The second element in the tuple is the list of vectors for
+//    the postings. Each vector is a tuple containing (First Lang Index * langSpread, highestScore)
+      val langLabel: String = langs(dominantGroup._1 / langSpread)   //lang index
       // most common language in the cluster
-      val langPercent: Double = ???
+
+      val clusterSize: Int = vs.size
+
+      val langPercent: Double = dominantGroup._2 / clusterSize
       // percent of the questions in the most common language
-      val clusterSize: Int = ???
-      val medianScore: Int = ???
+
+      def median(s: Seq[Int]):Int  =
+      {
+        val (lower, upper) = s.sortWith(_<_).splitAt(s.size / 2)
+        if (s.size % 2 == 0) (lower.last + upper.head) / 2 else upper.head
+      }
+
+      val medianScore: Int = median(vs.map(_._2).toSeq)
 
       (langLabel, langPercent, clusterSize, medianScore)
     }
@@ -311,6 +341,6 @@ class StackOverflow extends Serializable {
     println("  Score  Dominant language (%percent)  Questions")
     println("================================================")
     for ((lang, percent, size, score) <- results)
-      println(f"${score}%7d  ${lang}%-17s (${percent}%-5.1f%%)      ${size}%7d")
+      println(f"$score%7d  $lang%-17s ($percent%-5.1f%%)      $size%7d")
   }
 }
