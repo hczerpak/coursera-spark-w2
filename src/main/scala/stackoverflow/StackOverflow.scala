@@ -76,7 +76,16 @@ class StackOverflow extends Serializable {
   /** Group the questions and answers together */
   def groupedPostings(postings: RDD[Posting]): RDD[(Int, Iterable[(Posting, Posting)])] = {
     val questions = postings.filter(p => p.postingType == 1).map(p => (p.id, p))
-    val answers = postings.filter(p => p.postingType == 2).map(p => (p.id, p))
+    val answers = postings
+      .filter(p => p.postingType == 2)
+      .filter(p => p.parentId.isDefined)
+      .map(p => (p.parentId.get, p))
+
+    println(
+      s"""questions count: ${questions.count()}
+         |answers count: ${answers.count()}
+         |join count: ${questions.join(answers).count()}
+       """.stripMargin)
 
     questions
       .join(answers)
@@ -86,30 +95,10 @@ class StackOverflow extends Serializable {
 
   /** Compute the maximum score for each posting */
   def scoredPostings(grouped: RDD[(Int, Iterable[(Posting, Posting)])]): RDD[(Posting, Int)] = {
-
-    def answerHighScore(as: Array[Posting]): Int = {
-      var highScore = 0
-      var i = 0
-      while (i < as.length) {
-        val score = as(i).score
-        if (score > highScore)
-          highScore = score
-        i += 1
-      }
-      highScore
-    }
-
     grouped
-      .flatMapValues(iterable => {
-        val answersByQuestion = iterable.groupBy(_._1).mapValues(iterable => iterable.toArray.map(_._2))
-
-        answersByQuestion.keys
-          .map(key => (key, answersByQuestion.get(key)))
-          .filter(ranking => ranking._2.isDefined)
-          .map(ranking => (ranking._1, ranking._2.get))
-      })
+      .flatMapValues(iterable => iterable.groupBy(_._1).mapValues(iterable => iterable.toArray.map(_._2)))
       .map(dropId => dropId._2)
-      .map(getHighScore => (getHighScore._1, answerHighScore(getHighScore._2)))
+      .map(getHighScore => (getHighScore._1, getHighScore._2.map(p => p.score).max))
   }
 
 
@@ -139,16 +128,9 @@ class StackOverflow extends Serializable {
 
     scored
       .map(ranking => (firstLangInTag(ranking._1.tags, langs), ranking._2))
-      .filter( p => {
-        p._1 match {
-          case Some(_) => true
-          case _ => false
-        }
-      })
-      .map(p => (p._1.get, p._2))
-//      .map( case (optionL, score) => (optionL.get, score)) //why decomposing pair does never kurwa work????
-      .map(p => (p._1 * langSpread, p._2))
-//      .map((lang, score) => (lang * langSpread, score)) //again kurwa, cant decompose this shit
+      .filter({ case (som, _) => som.isDefined})
+      .map({ case (optionL, score) => (optionL.get, score) })
+      .map({ case (lang, score) => (lang * langSpread, score) })
   }
 
 
