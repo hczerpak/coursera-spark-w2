@@ -51,7 +51,7 @@ class StackOverflowSuite extends FunSuite with BeforeAndAfterAll {
     val raw = testObject.rawPostings(testObject.lines)
     val grouped = testObject.groupedPostings(raw)
 
-    assert(grouped.count() == 4160520, "Grouping doesn't do a thing right")
+    assert(grouped.count() == 2121822, "Grouping doesn't do a thing right")
   }
 
   test("Scored RDD should contain the following tuples") {

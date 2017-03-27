@@ -81,12 +81,6 @@ class StackOverflow extends Serializable {
       .filter(p => p.parentId.isDefined)
       .map(p => (p.parentId.get, p))
 
-    println(
-      s"""questions count: ${questions.count()}
-         |answers count: ${answers.count()}
-         |join count: ${questions.join(answers).count()}
-       """.stripMargin)
-
     questions
       .join(answers)
       .groupByKey()
@@ -185,17 +179,15 @@ class StackOverflow extends Serializable {
 
   /** Main kmeans computation */
   @tailrec final def kmeans(means: Array[(Int, Int)], vectors: RDD[(Int, Int)], iter: Int = 1, debug: Boolean = false): Array[(Int, Int)] = {
-//    pairing each vector with the index of the closest mean (its cluster);
-    val pairedVectors = vectors
-      .map(v => (v , means.map(m => (m, euclideanDistance(m, v))).maxBy(_._2)._1)) //pairs of (vector, closestMean)
-      .map(pa => (means.indexOf(pa._2), pa._1))
+    val newMeans = means.clone()
 
-//        computing the new means by averaging the values of each cluster.
-    val newMeans = pairedVectors
-      .mapValues({ case (a,b) => (a,b,1) })
-      .reduceByKey((a, b) => (a._1 + b._1, a._2 + b._2, a._3 + b._3))
-      .mapValues({ case (a, b, count) => (a/count, b/count) })
-      .values.collect()
+    vectors
+      .map(p => (findClosest(p, means), p))
+      .groupByKey()
+      .mapValues(averageVectors)
+      .values
+      .collect()
+      .zipWithIndex.foreach { case (freshMint, index) => newMeans.update(index, freshMint) }
 
     val distance = euclideanDistance(means, newMeans)
 
@@ -239,7 +231,7 @@ class StackOverflow extends Serializable {
 
   /** Return the euclidean distance between two points */
   def euclideanDistance(a1: Array[(Int, Int)], a2: Array[(Int, Int)]): Double = {
-    assert(a1.length == a2.length)
+    assert(a1.length == a2.length, s"Different means count: ${a1.length} and ${a2.length}")
     var sum = 0d
     var idx = 0
     while (idx < a1.length) {
