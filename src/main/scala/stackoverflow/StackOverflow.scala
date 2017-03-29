@@ -1,7 +1,7 @@
 package stackoverflow
 
 import org.apache.spark.rdd.RDD
-import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.{HashPartitioner, SparkConf, SparkContext}
 
 import scala.annotation.tailrec
 
@@ -12,7 +12,7 @@ case class Posting(postingType: Int, id: Int, acceptedAnswer: Option[Int], paren
 /** The main class */
 object StackOverflow extends StackOverflow {
 
-  @transient lazy val conf: SparkConf = new SparkConf().setMaster("local").setAppName("StackOverflow")
+  @transient lazy val conf: SparkConf = new SparkConf().setMaster("local[*]").setAppName("StackOverflow")
   @transient lazy val sc: SparkContext = new SparkContext(conf)
 
   /** Main function */
@@ -70,7 +70,7 @@ class StackOverflow extends Serializable {
         parentId = if (arr(3) == "") None else Some(arr(3).toInt),
         score = arr(4).toInt,
         tags = if (arr.length >= 6) Some(arr(5).intern()) else None)
-    })
+    }).persist()
 
 
   /** Group the questions and answers together */
@@ -82,8 +82,10 @@ class StackOverflow extends Serializable {
       .map(p => (p.parentId.get, p))
 
     questions
+      .partitionBy(new HashPartitioner(16)).persist()
       .join(answers)
       .groupByKey()
+      .persist()
   }
 
 
@@ -93,6 +95,7 @@ class StackOverflow extends Serializable {
       .flatMapValues(iterable => iterable.groupBy(_._1).mapValues(iterable => iterable.toArray.map(_._2)))
       .map(dropId => dropId._2)
       .map(getHighScore => (getHighScore._1, getHighScore._2.map(p => p.score).max))
+      .persist()
   }
 
 
@@ -125,6 +128,8 @@ class StackOverflow extends Serializable {
       .filter({ case (som, _) => som.isDefined})
       .map({ case (optionL, score) => (optionL.get, score) })
       .map({ case (lang, score) => (lang * langSpread, score) })
+      .partitionBy(new HashPartitioner(32))
+      .persist()
   }
 
 
@@ -182,12 +187,9 @@ class StackOverflow extends Serializable {
     val newMeans = means.clone()
 
     vectors
-      .map(p => (findClosest(p, means), p))
-      .groupByKey()
+      .groupBy(findClosest(_, means))
       .mapValues(averageVectors)
-      .values
-      .collect()
-      .zipWithIndex.foreach { case (freshMint, index) => newMeans.update(index, freshMint) }
+      .foreach { case (index, freshMint) => newMeans(index) = freshMint }
 
     val distance = euclideanDistance(means, newMeans)
 
@@ -232,6 +234,7 @@ class StackOverflow extends Serializable {
   /** Return the euclidean distance between two points */
   def euclideanDistance(a1: Array[(Int, Int)], a2: Array[(Int, Int)]): Double = {
     assert(a1.length == a2.length, s"Different means count: ${a1.length} and ${a2.length}")
+
     var sum = 0d
     var idx = 0
     while (idx < a1.length) {
@@ -293,7 +296,7 @@ class StackOverflow extends Serializable {
 
       val clusterSize: Int = vs.size
 
-      val langPercent: Double = dominantGroup._2 / clusterSize
+      val langPercent: Double = dominantGroup._2 / clusterSize * 100
       // percent of the questions in the most common language
 
       def median(s: Seq[Int]):Int  =
@@ -302,7 +305,7 @@ class StackOverflow extends Serializable {
         if (s.size % 2 == 0) (lower.last + upper.head) / 2 else upper.head
       }
 
-      val medianScore: Int = median(vs.map(_._2).toSeq)
+      val medianScore: Int = median(vs.map(_._2).toList.sorted)
 
       (langLabel, langPercent, clusterSize, medianScore)
     }

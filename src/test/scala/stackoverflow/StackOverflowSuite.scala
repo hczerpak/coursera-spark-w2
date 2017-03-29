@@ -69,14 +69,4 @@ class StackOverflowSuite extends FunSuite with BeforeAndAfterAll {
     assert(containsRankingById(126, 30), "should contain the following tuple ((1,126,None,None,33,Some(Java)),30)")
     assert(containsRankingById(174, 20), "should contain the following tuple ((1,174,None,None,38,Some(C#)),20)")
   }
-
-//  test("Loading raw postings work") {
-//    val raw = testObject.rawPostings(testObject.lines)
-//    val grouped = testObject.groupedPostings(raw)
-//    val scored = testObject.scoredPostings(grouped)
-//
-//    val vectors = testObject.vectorPostings(scored)
-    //    val means = kmeans(sampleVectors(vectors), vectors, debug = true)
-    //    val results = clusterResults(means, vectors)
-//  }
 }
